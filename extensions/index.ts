@@ -1112,6 +1112,70 @@ function normalizeSystemBlocks(
   return { blocks: ensurePromptBlock(nextBlocks, ctx), billingState };
 }
 
+/**
+ * Build the OAuth-aware Anthropic stream wrapper. Non-OAuth traffic passes
+ * straight through to Pi's built-in streamer; OAuth traffic gets quota
+ * preflight and 429 -> readable-quota-message translation. The same wrapper is
+ * reused for every account provider (`anthropic`, `anthropic-2`, …) so extra
+ * subscriptions get identical protection, not just the base account.
+ */
+function buildAnthropicStreamSimple(
+  streamSimpleAnthropic: NonNullable<ReturnType<typeof getApiProvider>>["streamSimple"],
+): (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => ReturnType<typeof createAssistantMessageEventStream> {
+  return (model, context, options) => {
+    const anthropicModel = model as Model<"anthropic-messages">;
+    log("custom_stream_invoked", {
+      model: anthropicModel.id,
+      provider: anthropicModel.provider,
+      isOAuth: isAnthropicOAuthToken(options?.apiKey),
+    });
+    if (!isAnthropicOAuthToken(options?.apiKey)) {
+      return streamSimpleAnthropic(anthropicModel, context, options);
+    }
+
+    const outer = createAssistantMessageEventStream();
+
+    void (async () => {
+      try {
+        const preflightFooterStatus = await resolveAnthropicQuotaFooterStatus(anthropicModel, options);
+        if (preflightFooterStatus?.severity === "error") {
+          log("custom_stream_preflight_rejected", { message: preflightFooterStatus.message });
+          applyFooterStatusToCurrentContext(preflightFooterStatus);
+          outer.push(createAnthropicErrorEvent(anthropicModel, preflightFooterStatus.message));
+          return;
+        }
+
+        if (preflightFooterStatus?.severity === "warning") {
+          log("custom_stream_preflight_warning", { message: preflightFooterStatus.message });
+          applyFooterStatusToCurrentContext(preflightFooterStatus);
+        }
+
+        const inner = streamSimpleAnthropic(anthropicModel, context, options);
+        for await (const event of inner) {
+          log("custom_stream_event", { type: event.type, hasErrorMessage: event.type === "error" ? !!event.error.errorMessage : false });
+          if (event.type === "error" && isAnthropicRateLimitError(event.error.errorMessage)) {
+            log("custom_stream_rate_limit", { message: event.error.errorMessage });
+            const footerStatus = await resolveAnthropicQuotaFooterStatus(anthropicModel, options);
+            if (footerStatus) {
+              log("custom_stream_quota_resolved", { message: footerStatus.message, severity: footerStatus.severity });
+              applyFooterStatusToCurrentContext(footerStatus);
+              outer.push(createAnthropicErrorEvent(anthropicModel, footerStatus.message));
+              continue;
+            }
+          }
+
+          outer.push(event);
+        }
+        outer.end();
+      } catch (error) {
+        outer.push(createAnthropicErrorEvent(anthropicModel, error instanceof Error ? error.message : String(error)));
+      }
+    })();
+
+    return outer;
+  };
+}
+
 export default function claudeOauthAdapter(pi: ExtensionAPI) {
   // Capture Pi's built-in Anthropic streamer before registering our wrapper.
   // Importing provider subpaths is not portable across Pi 0.79 and 0.84.
@@ -1120,60 +1184,11 @@ export default function claudeOauthAdapter(pi: ExtensionAPI) {
     throw new Error("Pi's built-in anthropic-messages provider is unavailable");
   }
 
+  const anthropicStreamSimple = buildAnthropicStreamSimple(streamSimpleAnthropic);
+
   pi.registerProvider("anthropic", {
     api: "anthropic-messages",
-    streamSimple: (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => {
-      const anthropicModel = model as Model<"anthropic-messages">;
-      log("custom_stream_invoked", {
-        model: anthropicModel.id,
-        provider: anthropicModel.provider,
-        isOAuth: isAnthropicOAuthToken(options?.apiKey),
-      });
-      if (!isAnthropicOAuthToken(options?.apiKey)) {
-        return streamSimpleAnthropic(anthropicModel, context, options);
-      }
-
-      const outer = createAssistantMessageEventStream();
-
-      void (async () => {
-        try {
-          const preflightFooterStatus = await resolveAnthropicQuotaFooterStatus(anthropicModel, options);
-          if (preflightFooterStatus?.severity === "error") {
-            log("custom_stream_preflight_rejected", { message: preflightFooterStatus.message });
-            applyFooterStatusToCurrentContext(preflightFooterStatus);
-            outer.push(createAnthropicErrorEvent(anthropicModel, preflightFooterStatus.message));
-            return;
-          }
-
-          if (preflightFooterStatus?.severity === "warning") {
-            log("custom_stream_preflight_warning", { message: preflightFooterStatus.message });
-            applyFooterStatusToCurrentContext(preflightFooterStatus);
-          }
-
-          const inner = streamSimpleAnthropic(anthropicModel, context, options);
-          for await (const event of inner) {
-            log("custom_stream_event", { type: event.type, hasErrorMessage: event.type === "error" ? !!event.error.errorMessage : false });
-            if (event.type === "error" && isAnthropicRateLimitError(event.error.errorMessage)) {
-              log("custom_stream_rate_limit", { message: event.error.errorMessage });
-              const footerStatus = await resolveAnthropicQuotaFooterStatus(anthropicModel, options);
-              if (footerStatus) {
-                log("custom_stream_quota_resolved", { message: footerStatus.message, severity: footerStatus.severity });
-                applyFooterStatusToCurrentContext(footerStatus);
-                outer.push(createAnthropicErrorEvent(anthropicModel, footerStatus.message));
-                continue;
-              }
-            }
-
-            outer.push(event);
-          }
-          outer.end();
-        } catch (error) {
-          outer.push(createAnthropicErrorEvent(anthropicModel, error instanceof Error ? error.message : String(error)));
-        }
-      })();
-
-      return outer;
-    },
+    streamSimple: anthropicStreamSimple,
   });
 
   pi.on("session_start", (_event, ctx) => {
@@ -1184,7 +1199,7 @@ export default function claudeOauthAdapter(pi: ExtensionAPI) {
     try {
       // SAFETY: ModelRegistry satisfies the structural RegistryLike surface
       // (getProvider/getAll/registerProvider/unregisterProvider) on Pi 0.79-0.84.
-      const result = registerAnthropicAccounts(ctx.modelRegistry as never);
+      const result = registerAnthropicAccounts(ctx.modelRegistry as never, anthropicStreamSimple);
       if (result.registered.length > 0 || result.skipped) {
         log("multi_account_registration", { registered: result.registered, skipped: result.skipped ?? null });
       }

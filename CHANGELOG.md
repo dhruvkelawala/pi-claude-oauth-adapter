@@ -2,6 +2,10 @@
 
 All notable changes to `pi-claude-oauth-adapter` live here.
 
+## 0.3.1 — 2026-08-29
+
+- Apply the OAuth-aware Anthropic stream wrapper (quota preflight and 429 → readable-quota-message translation) to the extra `anthropic-N` account providers, not just the base `anthropic` account. Previously extra subscriptions fell back to Pi's raw streamer and silently skipped those protections.
+
 ## 0.3.0 — 2026-08-29
 
 - Register extra Claude subscriptions (`anthropic-2`, `anthropic-3`, …) directly, so multi-account OAuth no longer depends on pi-multi-pass. Its Anthropic login imports `loginAnthropic` from `@earendil-works/pi-ai/oauth`, which is a **type-only** entry point on this Pi line (`dist/oauth.js` is `export {}`), so signing in failed with `(0 , _oauth.loginAnthropic) is not a function`.

@@ -180,8 +180,13 @@ export interface RegisterAccountsResult {
  * extension that registers the same provider ids (notably pi-multi-pass, whose
  * Anthropic OAuth implementation is broken on this Pi line); the last
  * registration wins.
+ *
+ * `streamSimple` is the adapter's OAuth-aware Anthropic stream wrapper. Passing
+ * it here gives extra accounts the same quota preflight and 429 translation the
+ * base `anthropic` provider gets; without it, `anthropic-N` traffic would fall
+ * back to Pi's raw streamer and silently skip those protections.
  */
-export function registerAnthropicAccounts(registry: RegistryLike): RegisterAccountsResult {
+export function registerAnthropicAccounts(registry: RegistryLike, streamSimple?: unknown): RegisterAccountsResult {
   const accounts = loadClaudeAccounts();
   if (accounts.length === 0) return { registered: [] };
 
@@ -202,13 +207,15 @@ export function registerAnthropicAccounts(registry: RegistryLike): RegisterAccou
     } catch {
       // Not previously registered (or owned by another extension); registration below still wins.
     }
-    registry.registerProvider(name, {
+    const config: Record<string, unknown> = {
       name: account.label ? `Claude (${account.label})` : `Claude #${account.index}`,
       baseUrl: base?.baseUrl,
       api: models[0]?.api,
       models,
       oauth: bridgeOAuth(builtinOAuth, account),
-    });
+    };
+    if (typeof streamSimple === "function") config.streamSimple = streamSimple;
+    registry.registerProvider(name, config);
     registered.push(name);
   }
   return { registered };

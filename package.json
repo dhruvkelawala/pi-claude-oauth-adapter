@@ -1,6 +1,6 @@
 {
   "name": "pi-claude-oauth-adapter",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": false,
   "type": "module",
   "files": [

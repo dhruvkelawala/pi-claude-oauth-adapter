@@ -2,6 +2,11 @@
 
 All notable changes to `pi-claude-oauth-adapter` live here.
 
+## 0.2.3 — 2026-08-28
+
+- Support multi-account Anthropic OAuth providers (`anthropic-2`, `anthropic-3`, …) as registered by pi-multi-pass: `shouldApply` now matches the `anthropic-N` naming convention.
+- Suffix the footer status with the active multi-account provider (e.g. `✓ Claude OAuth active [anthropic-2]`) so it's obvious which subscription a session is using.
+
 ## 0.2.2 — 2026-08-22
 
 - Migrate Pi runtime imports and peer dependencies to the `@earendil-works/*` package scope.

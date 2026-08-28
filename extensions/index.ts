@@ -755,9 +755,15 @@ function log(event: string, details: Record<string, unknown>): void {
   }
 }
 
+const ANTHROPIC_MULTI_ACCOUNT_REGEX = /^anthropic-\d+$/;
+
+function isAnthropicProvider(provider: string): boolean {
+  return provider === "anthropic" || ANTHROPIC_MULTI_ACCOUNT_REGEX.test(provider);
+}
+
 function shouldApply(ctx: ExtensionContext): boolean {
   const model = ctx.model;
-  return !!model && model.provider === "anthropic" && ctx.modelRegistry.isUsingOAuth(model);
+  return !!model && isAnthropicProvider(model.provider) && ctx.modelRegistry.isUsingOAuth(model);
 }
 
 function clearAdapterStatuses(ctx: ExtensionContext): void {
@@ -792,6 +798,10 @@ function renderAdapterStatus(ctx: ExtensionContext): void {
 }
 
 function setAdapterStatus(ctx: ExtensionContext, nextStatus: AdapterStatusState): void {
+  // Distinguish multi-account providers (e.g. anthropic-2 from pi-multi-pass) in the footer.
+  const model = ctx.model;
+  const suffix = model && ANTHROPIC_MULTI_ACCOUNT_REGEX.test(model.provider) ? ` [${model.provider}]` : "";
+  nextStatus.statusText = (nextStatus.statusText ?? "") + suffix;
   adapterStatus = nextStatus;
   renderAdapterStatus(ctx);
 }

@@ -2,8 +2,7 @@ import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { createAssistantMessageEventStream, type Api, type AssistantMessageEvent, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
-import { streamSimpleAnthropic } from "@earendil-works/pi-ai/anthropic";
+import { createAssistantMessageEventStream, getApiProvider, type Api, type AssistantMessageEvent, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 type ProviderHeaders = Record<string, string | null | undefined>;
@@ -1113,6 +1112,13 @@ function normalizeSystemBlocks(
 }
 
 export default function claudeOauthAdapter(pi: ExtensionAPI) {
+  // Capture Pi's built-in Anthropic streamer before registering our wrapper.
+  // Importing provider subpaths is not portable across Pi 0.79 and 0.84.
+  const streamSimpleAnthropic = getApiProvider("anthropic-messages")?.streamSimple;
+  if (!streamSimpleAnthropic) {
+    throw new Error("Pi's built-in anthropic-messages provider is unavailable");
+  }
+
   pi.registerProvider("anthropic", {
     api: "anthropic-messages",
     streamSimple: (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => {

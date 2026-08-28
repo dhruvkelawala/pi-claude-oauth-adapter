@@ -2,6 +2,13 @@
 
 All notable changes to `pi-claude-oauth-adapter` live here.
 
+## 0.3.0 — 2026-08-29
+
+- Register extra Claude subscriptions (`anthropic-2`, `anthropic-3`, …) directly, so multi-account OAuth no longer depends on pi-multi-pass. Its Anthropic login imports `loginAnthropic` from `@earendil-works/pi-ai/oauth`, which is a **type-only** entry point on this Pi line (`dist/oauth.js` is `export {}`), so signing in failed with `(0 , _oauth.loginAnthropic) is not a function`.
+- Each account's OAuth flow now delegates to the built-in `anthropic` provider descriptor resolved from Pi's registry at runtime, so login, refresh, and credential storage match the base account exactly while each account keeps its own credential entry.
+- Accounts are read from `claude-accounts.json`, falling back to pi-multi-pass's `multi-pass.json`, under `PI_CODING_AGENT_DIR` (default `~/.pi/agent`).
+- Registration runs on session start so it wins over any other extension registering the same provider ids.
+
 ## 0.2.3 — 2026-08-28
 
 - Support multi-account Anthropic OAuth providers (`anthropic-2`, `anthropic-3`, …) as registered by pi-multi-pass: `shouldApply` now matches the `anthropic-N` naming convention.

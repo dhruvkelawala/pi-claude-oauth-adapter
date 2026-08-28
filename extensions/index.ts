@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, getApiProvider, type Api, type AssistantMessageEvent, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { registerAnthropicAccounts } from "./multi-account.js";
 
 type ProviderHeaders = Record<string, string | null | undefined>;
 
@@ -1176,6 +1177,20 @@ export default function claudeOauthAdapter(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", (_event, ctx) => {
+    // Register configured extra Claude subscriptions (anthropic-2, …) before the
+    // user can reach /login or the model picker. Done here rather than at
+    // activation so this registration lands after any other extension that
+    // claims the same provider ids.
+    try {
+      // SAFETY: ModelRegistry satisfies the structural RegistryLike surface
+      // (getProvider/getAll/registerProvider/unregisterProvider) on Pi 0.79-0.84.
+      const result = registerAnthropicAccounts(ctx.modelRegistry as never);
+      if (result.registered.length > 0 || result.skipped) {
+        log("multi_account_registration", { registered: result.registered, skipped: result.skipped ?? null });
+      }
+    } catch (error) {
+      log("multi_account_registration_failed", { message: error instanceof Error ? error.message : String(error) });
+    }
     syncSetupStatus(ctx, ctx.getSystemPrompt());
   });
 

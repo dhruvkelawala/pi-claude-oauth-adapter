@@ -6,6 +6,7 @@ All notable changes to `pi-claude-oauth-adapter` live here.
 
 - Support multi-account Anthropic OAuth providers (`anthropic-2`, `anthropic-3`, …) as registered by pi-multi-pass: `shouldApply` now matches the `anthropic-N` naming convention.
 - Suffix the footer status with the active multi-account provider (e.g. `✓ Claude OAuth active [anthropic-2]`) so it's obvious which subscription a session is using.
+- Restore compatibility with SumoCode/Pi 0.79.x by using its exported Anthropic provider entry point and pinning development checks to the deployed runtime version.
 
 ## 0.2.2 — 2026-08-22
 

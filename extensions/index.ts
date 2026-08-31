@@ -581,7 +581,7 @@ function getUsageLimit(value: unknown): { utilization: number; resetsAt?: number
   return { utilization: value.utilization / 100, resetsAt: parseUsageReset(value.resets_at) };
 }
 
-function usageResponseToRateLimitHeaders(value: unknown): Record<string, string> | null {
+export function usageResponseToRateLimitHeaders(value: unknown): Record<string, string> | null {
   if (!isObject(value)) return null;
   const candidates: Array<{ type: ClaudeRateLimitType; value: { utilization: number; resetsAt?: number } | null }> = [
     { type: "five_hour", value: getUsageLimit(value.five_hour) },
@@ -596,11 +596,28 @@ function usageResponseToRateLimitHeaders(value: unknown): Record<string, string>
     .sort((a, b) => b.value.utilization - a.value.utilization)[0];
   const extraUsage = isObject(value.extra_usage) ? value.extra_usage : null;
   const disabledReason = extraUsage && typeof extraUsage.disabled_reason === "string" ? extraUsage.disabled_reason : undefined;
+  const extraUsageUtilization = extraUsage && typeof extraUsage.utilization === "number" && Number.isFinite(extraUsage.utilization)
+    ? extraUsage.utilization / 100
+    : undefined;
+  const extraUsageAvailable = extraUsage?.is_enabled === true
+    && disabledReason === undefined
+    && (extraUsageUtilization === undefined || extraUsageUtilization < 1);
   if (!representative && !disabledReason) return null;
 
   const result: Record<string, string> = {
     "anthropic-ratelimit-unified-status": "rejected",
   };
+  if (representative && extraUsageAvailable) {
+    // A plan window at 100% does not reject the request while paid extra usage
+    // remains available. Preserve the rejected plan claim while marking the
+    // overage fallback as allowed so the stream wrapper proceeds.
+    result["anthropic-ratelimit-unified-overage-status"] = "allowed";
+    result["anthropic-ratelimit-unified-overage-in-use"] = "true";
+    result["anthropic-ratelimit-unified-fallback"] = "available";
+    if (extraUsageUtilization !== undefined) {
+      result["anthropic-ratelimit-unified-overage-utilization"] = String(extraUsageUtilization);
+    }
+  }
   if (representative) {
     result["anthropic-ratelimit-unified-representative-claim"] = representative.type;
     if (representative.value.resetsAt !== undefined) {
